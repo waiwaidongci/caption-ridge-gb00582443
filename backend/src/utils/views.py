@@ -14,7 +14,25 @@ def run(item, detail=False):
                  'has_export': bool(item.export_file), 'error': item.error}
     if detail:
         item_view.update(params=item.params, result=item.result, review_note=item.review_note)
+        item_view['simulation'] = simulation_view(item.__dict__.get('_simulation'),
+                                                  item.__dict__.get('_batch_counts'))
     return item_view
+
+
+def simulation_view(simulation, counts=None):
+    if simulation is None:
+        return None
+    counts = counts or {}
+    return {'revision': simulation.revision,
+            'published_revision': simulation.published_revision,
+            'reserved_minutes': simulation.reserved_minutes,
+            'iterations': simulation.iterations,
+            'batch_size': simulation.batch_size,
+            'status': simulation.status,
+            'batch_count': sum(counts.values()),
+            'completed_batches': counts.get('complete', 0),
+            'failed_batches': counts.get('failed', 0),
+            'published_at': iso(simulation.published_at)}
 
 
 def schedule(item):

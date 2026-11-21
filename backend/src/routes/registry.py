@@ -19,7 +19,7 @@ router = APIRouter()
 
 @router.get('/spec')
 def spec():
-    return {key: value for key, value in SPEC.items() if key != 'fixture'}
+    return {key: value for key, value in SPEC.items() if key not in ('fixture', 'simulation_workers')}
 
 
 @router.get('/template')

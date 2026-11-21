@@ -163,6 +163,28 @@ def _table(title, columns, rows):
     return {"title": title, "columns": [{"key": key, "label": label} for key, label in columns], "rows": rows}
 
 
+def _simulation_inputs(model, holdout, pending):
+    """Summarize the holdout-day errors and pending-day estimates for simulation."""
+    by_day = {}
+    for row in holdout:
+        estimate = round(max(0.0, model.predict(row)), 2)
+        by_day.setdefault(row["job_date"], []).append(estimate - row["actual_minutes"])
+    day_errors = [
+        {"job_date": day, "job_count": len(errors), "mean_error": fmean(errors)}
+        for day, errors in sorted(by_day.items())
+    ]
+
+    pending_days = {}
+    for row in pending:
+        bucket = pending_days.setdefault(row["job_date"], {"job_count": 0, "base_minutes": 0.0})
+        bucket["job_count"] += 1
+        bucket["base_minutes"] += round(max(0.0, model.predict(row)), 2)
+    return {
+        "day_errors": day_errors,
+        "pending_days": [{"job_date": day, **values} for day, values in sorted(pending_days.items())],
+    }
+
+
 def analyze(rows, normalized_params):
     from src.services.validation import normalize_params
 
@@ -202,6 +224,7 @@ def analyze(rows, normalized_params):
         {"stage": stage, "first": subset[0]["job_date"], "last": subset[-1]["job_date"], "count": len(subset)}
         for stage, subset in (("训练", training), ("选型", selection), ("留出", holdout))
     ]
+    simulation_inputs = _simulation_inputs(model, holdout, pending)
     identifiers = (("job_id", "工单号"), ("job_date", "工单日期"), ("title", "讲座标题"))
     tables = [
         _table("待审工时与核排清单", identifiers + (
@@ -239,4 +262,5 @@ def analyze(rows, normalized_params):
                      "标准化系数的正负表示条件关联方向，相关特征的系数应一起看。"
                      "标准差小于 10⁻¹² 的列按恒定列处理。核排时优先查看标记原因和原始工单。"),
         }],
+        "simulation_inputs": simulation_inputs,
     }

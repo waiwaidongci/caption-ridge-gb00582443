@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from src.config.database import connection
 from src.config.settings import ARTIFACTS
@@ -8,10 +8,11 @@ from src.constants.enums import Review, Role, Status
 from src.controllers.auth import allow, current
 from src.domain.spec import SPEC
 from src.models.identity import User
-from src.models.jobs import Run
+from src.models.jobs import Run, Simulation, SimulationBatch
 from src.models.source import Dataset
-from src.schemas.requests import ReviewRequest, RunRequest
+from src.schemas.requests import ReservedRequest, ReviewRequest, RunRequest
 from src.services.audit import record
+from src.services.execution import revise_reserved
 from src.services.validation import normalize_params
 from src.utils import views
 from src.utils.wakeup import wake
@@ -23,6 +24,14 @@ def require_job(db, run_id, lock=False):
     item = db.get(Run, run_id, with_for_update=lock)
     if not item:
         raise HTTPException(404, '找不到该运行记录')
+    item.__dict__['_simulation'] = db.scalar(select(Simulation).where(Simulation.run_id == run_id)
+                                             .order_by(Simulation.version.desc()).limit(1))
+    simulation = item.__dict__['_simulation']
+    item.__dict__['_batch_counts'] = (
+        dict(db.execute(select(SimulationBatch.status, func.count())
+                        .where(SimulationBatch.simulation_id == simulation.id)
+                        .group_by(SimulationBatch.status)).all())
+        if simulation else None)
     return item
 
 
@@ -78,3 +87,15 @@ def review(run_id: int, body: ReviewRequest, db: Session = Depends(connection),
     record(db, actor.username, f'review.{item.review}', item.id, note=body.note, decision=item.decision)
     db.commit()
     return views.run(item, detail=True)
+
+
+@router.post('/{run_id}/reserved')
+def reserved(run_id: int, body: ReservedRequest, db: Session = Depends(connection),
+             actor: User = Depends(allow(Role.ADMIN, Role.ANALYST))):
+    item = require_job(db, run_id)
+    if item.status not in (Status.RUNNING, Status.COMPLETE):
+        raise HTTPException(409, '只有已开始模拟的记录可以改预留分钟')
+    outcome = revise_reserved(item.id, body.reserved_minutes, actor.username)
+    db.expire_all()
+    return {**views.run(require_job(db, run_id), detail=True), 'published': outcome['published'],
+            'revision': outcome['revision'], 'reserved_minutes': outcome['reserved_minutes']}

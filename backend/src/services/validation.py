@@ -76,4 +76,12 @@ def normalize_params(params):
     fields = SPEC['params']
     if set(params) - {field['key'] for field in fields}:
         raise ValueError('存在未知运行参数，请重新打开工作面板')
-    return {field['key']: cell(field, params.get(field['key'], field['default'])) for field in fields}
+    values = {field['key']: cell(field, params.get(field['key'], field['default'])) for field in fields}
+    if 'simulation_iterations' in values:
+        iterations = values['simulation_iterations']
+        size = values['simulation_batch_size']
+        if size > iterations:
+            raise ValueError('每批样本数不能大于模拟次数')
+        if -(-iterations // size) > 400:
+            raise ValueError('批次数最多 400 个，请调大每批样本数')
+    return values

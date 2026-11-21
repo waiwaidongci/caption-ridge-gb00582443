@@ -1,6 +1,7 @@
 import {plot} from '../components/common/chart.js';
 import {feedback} from '../components/common/fields.js';
 import {empty, metrics, panel, pill} from '../components/common/panels.js';
+import {canRevise, reservedForm, simulationProgress} from '../components/common/simulation.js';
 import {table} from '../components/common/table.js';
 import {REVIEW, STATUS} from '../constants/enums.js';
 import {handler, poll} from '../hooks/action.js';
@@ -18,12 +19,15 @@ export async function results(route, refresh) {
   const finished = item => item.status === 'complete' || item.status === 'failed';
   if (!finished(job)) {
     const original = location.hash;
-    const status = el('p',{role:'status'},'后台正在计算，完成后会自动展示。');
+    const status = el('p',{role:'status'},'后台正在分批模拟，完成后会自动展示。');
     poll(()=>workspace.getRun(id),finished,()=>location.hash===original)
       .then(result=>{if (result && status.isConnected && location.hash===original) refresh();
         else if(status.isConnected) status.textContent='仍在执行，请点击刷新检查。';})
       .catch(error=>{if(status.isConnected) status.textContent=error.message;});
-    return panel(job.name,pill(STATUS[job.status],job.status),status,button('刷新',{class:'quiet',onClick:refresh}));
+    const revise = job.simulation && canRevise() && reservedForm(job, message, refresh);
+    return panel(job.name,pill(STATUS[job.status],job.status),simulationProgress(job),
+      revise && panel('调整每日预留分钟',p('改预留分钟不用等旧批次结束；新版本仍要全部批次算齐才切换页面与下载。','subtle'),revise),
+      status,message,button('刷新',{class:'quiet',onClick:refresh}));
   }
   const download = button('下载结果 CSV',{class:'quiet','data-testid':'export',onClick:event=>
     handler(download,message,()=>workspace.download(`/runs/${job.id}/export`,`${spec.short_name}-${job.id}.csv`))(event)});
@@ -31,19 +35,25 @@ export async function results(route, refresh) {
     el('select',{id:'run-picker',onChange:event=>{location.hash=`#results/${event.target.value}`;}},
       (runs.some(item=>item.id===job.id) ? runs : [job,...runs]).map(item=>el('option',{value:item.id,selected:item.id===job.id},item.name))));
   const result = job.result;
+  const revise = result && job.simulation && canRevise() && reservedForm(job, message, refresh);
   const analysis = result ? el('section',{class:'analysis','data-testid':'analysis-complete'},
     el('div',{class:'result-head'},p(job.name,'eyeline'),h(2,result.headline),p(result.note,'intro-copy'),
       el('div',{class:'actions'},pill(STATUS[job.status],job.status),download,message)),
+    revise && panel('调整每日预留分钟',p('沿用已算样本重算超时概率，全部批次算齐后才切换页面与下载。','subtle'),revise),
     metrics(result.metrics),
     result.charts.map(plot),
     (result.sections || []).map(item=>panel(item.title,p(item.text))),
     result.tables.map(item=>panel(item.title,table(item.columns,item.rows,{caption:item.title}))))
-    : panel(job.name,pill(STATUS[job.status],job.status),p(job.error,'feedback'),link('返回调整参数',`#run/${job.dataset_id}`,{class:'quiet'}));
+    : panel(job.name,pill(STATUS[job.status],job.status),simulationProgress(job),p(job.error,'feedback'),
+      link('返回调整参数',`#run/${job.dataset_id}`,{class:'quiet'}));
   const inputs = spec.params.map(param=>el('div',{},el('dt',{},param.label),el('dd',{},value(job.params[param.key]))));
   return el('div',{},el('div',{class:'two-col'},el('div',{class:'wide-panel'},analysis),
     el('aside',{class:'sidebar-panel'},panel('运行来源',history,
       source && link(source.name,`#inputs/${source.id}`),p(date(job.finished_at),'subtle'),
       el('dl',{class:'dictionary'},inputs)),
+    job.simulation && panel('模拟版本',
+      p(`第 ${job.simulation.published_revision ?? '—'} 版已发布${job.simulation.revision !== job.simulation.published_revision ? ` · 第 ${job.simulation.revision} 版待算齐` : ''}`, 'subtle'),
+      p(`每日预留 ${value(job.simulation.reserved_minutes)} 分钟 · ${value(job.simulation.iterations)} 次 · 每批 ${value(job.simulation.batch_size)} 次`, 'subtle')),
     result && panel(spec.decision, pill(REVIEW[job.review],job.review),
       link('打开复核记录',`#review/${job.id}`,{class:'quiet'})))));
 }

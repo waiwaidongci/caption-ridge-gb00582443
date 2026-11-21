@@ -13,6 +13,7 @@ export const workspace = {
   upload: data => call('/datasets', data),
   start: data => call('/runs', data),
   review: (id, data) => call(`/runs/${id}/review`, data),
+  reviseReserved: (id, reservedMinutes) => call(`/runs/${id}/reserved`, {reserved_minutes:reservedMinutes}),
   audit: () => call('/audit'),
   schedules: () => call('/schedules'),
   deliveries: () => call('/deliveries'),
